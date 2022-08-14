@@ -1,0 +1,482 @@
+---
+title: "MLRM Script"
+author: "Clarisse Rodriguez"
+date: '2022-08-14'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load required libraries
+library(olsrr)
+library(dplyr)
+library(car)
+library(knitr)
+library(rmarkdown)
+library(nortest)
+library(lmtest)
+
+```
+
+```{r}
+# Load the data set
+growth <- read.csv("C:\\Users\\Clarisse Rodriguez\\OneDrive\\Documents\\DS Projects\\Stat Projects\\Stat 136\\Data-Alberto_Rodriguez_Zacarias (1).csv")
+
+dim(growth) # prints the dimensions of the data frame, 58 rows and 18 columns 
+```
+
+```{r}
+head(growth)
+```
+
+Fit the full model to the data, utilizing all the independent variables to predict 'growth'.
+
+```{r}
+model<-lm(growth~., data = growth[,-1])
+
+summary(model)
+```
+
+The full multiple linear regression model has an adjusted R-squared of 85.93. This means that 86.93% of the variation in the population growth rate can be explained by the 16 predictor variables.
+
+Using an alpha = 0.05, the variables coverage.HIV, income.percapita,infant.mortality, med.age, under5mortality, exp.educ and contraceptive
+were found to be significant.
+
+## Variable Selection
+
+A. All-Possible-Regression
+
+This procedure performs multiple linear regression across all possible combinations of independent variables.
+
+```{r}
+apr_result <- ols_step_all_possible(model)
+```
+
+```{r}
+paged_table(apr_result, options = list(rows.print = 10, cols.print = 4))
+```
+
+Finding the best combination of variables per class.
+
+```{r}
+class_lst <- unique(apr_result$n)
+apr_best <- data.frame()
+
+for (class in class_lst) {
+  best_class <- data.frame(apr_result %>% filter(n==class) %>% arrange(desc(adjr))%>% slice(1) %>% select(n, predictors, rsquare, adjr, cp))
+  apr_best <- rbind(apr_best, best_class)
+}
+```
+
+```{r}
+kable(apr_best)
+```
+
+B. Step-wise Selection Procedure
+
+```{r}
+ols_step_both_p(model,penter = 0.05, prem = 0.05)
+```
+
+Based on the step-wise procedure, the variables med.age,
+income.percapita, contraceptive, and exp.educ were selected for the reduced model.
+
+Partial Regression Plots - examining the partial importance of a particular variable
+
+```{r fig.height = 4}
+avPlots(model)
+```
+
+The partial regression plots of the variables med.age, income.percapita,contraceptive, and exp.educ show no deviation from linearity, and thus may be added as a linear term.
+
+### Model V1 (4 variables): med.age, income.percapita, contraceptive, and exp.educ
+
+```{r}
+model.v1<-lm(growth~med.age+income.percapita+contraceptive+exp.educ, data = growth)
+
+summary(model.v1)
+```
+
+Model v1:
+
+growth = 5.386 - (0.1542)med.age + (0.0000727)income.percapita -
+(0.01546)contraceptive + (0.08207)exp.educ
+
+Diagnostics Checking
+
+1.) The error terms follow a normal distribution.
+
+```{r}
+e1<-residuals(model.v1)
+
+qqnorm(e1, ylim=c(-2,2))
+```
+
+```{r}
+ad.test(e1)
+```
+
+At 0.05 level of significance, there is sufficient evidence to reject the null hypothesis that the residuals follow a normal distribution.
+This is also evident in the q-q plot which shows that the residuals deviate from a straight diagonal line.
+
+```{r}
+# Implement variable transformations to resolve non-normality.
+
+# a. Square root transform
+model.v1a<-lm(growth~sqrt(med.age)+sqrt(income.percapita)+sqrt(contraceptive)+sqrt(exp.educ), data = growth)
+
+e1a<-residuals(model.v1a)
+ad.test(e1a)
+
+# b. log transform
+
+model.v1b<-lm(log10(growth)~log10(med.age)+log10(income.percapita)+log10(contraceptive)+log10(exp.educ), data = growth)
+
+e1b<-residuals(model.v1b)
+ad.test(e1b)
+
+# c. Reciprocal 
+model.v1c<-lm(growth~(1/med.age)+(1/income.percapita)+(1/contraceptive)+(1/exp.educ), data = growth)
+
+e1c<-residuals(model.v1c)
+ad.test(e1c)
+
+# d. Cube root transform
+model.v1d<-lm((growth^(1/3))~(med.age)+(income.percapita)+(contraceptive)+(exp.educ), data = growth)
+
+e1d<-residuals(model.v1d)
+ad.test(e1d)
+
+```
+
+After attempting several transformations, the problem of non-normality still persists. Hence, adding another explanatory variable was considered based on the results of the All-Possible-Regression procedure.
+
+```{r}
+kable(head(apr_best), n = 5)
+```
+
+Based on the results of the APR, the variable coverage.HIV will be added to the model as it returned the highest coefficient of determination (R-squared) among the remaining variables.
+
+### Model V2 (5 variables): med.age, income.percapita, contraceptive, exp.educ, and coverage.HIV
+
+```{r}
+model.v2 <-lm(growth~med.age+income.percapita+contraceptive+exp.educ+coverage.HIV, data = growth)
+
+summary(model.v2)
+```
+
+Model v2:
+
+growth = 5.567 - (0.01564)med.age + (0.00007149)income.percapita -
+(0.0145)contraceptive + (0.09724)exp.educ - (0.00458)coverage.HIV
+
+Diagnostics Checking
+
+1.) The error terms follow a normal distribution.
+
+```{r}
+ad.test(residuals(model.v2)) 
+```
+
+At 0.05 level of significance, there is sufficient evidence to conclude that the residuals follow a normal distribution.
+
+2.) The error terms have a constant variance.
+
+```{r}
+bptest(model.v2)
+```
+
+At 0.05 level of significance, there is sufficient evidence to conclude that the residuals have a constant variance.
+
+3.) Multi-collinearity
+
+a.  Variance Inflation Factors (VIF)
+
+```{r}
+vif(model.v2)
+```
+
+b.  Condition number
+
+```{r}
+kappa(model.v2)
+```
+
+Since the condition number is greater than 1000, severe
+multicollinearity is present in the model.
+
+In an attempt to solve multicollinearity, the observations were centered.
+
+```{r}
+growth$growth2<-growth$growth-mean(growth$growth)
+growth$med.age2<-growth$med.age-mean(growth$med.age)
+growth$income.percapita2<-growth$income.percapita-mean(growth$income.percapita)
+growth$contraceptive2<-growth$contraceptive-mean(growth$contraceptive)
+growth$exp.educ2<-growth$exp.educ-mean(growth$exp.educ)
+growth$coverage.HIV2<-growth$coverage.HIV-mean(growth$coverage.HIV)
+```
+
+Fit a linear regression model to the centered data.
+
+```{r}
+model.v2.cent<-lm(growth2~med.age2+income.percapita2+contraceptive2+exp.educ2+coverage.HIV2, data = growth)
+kappa(model.v2.cent)
+```
+
+Since multicollinearity is still present, the variables are examined to remove any variable that may be causing it.
+
+```{r}
+apr_result[apr_result$predictors %in% c(
+'med.age', 
+'income.percapita',                                       'contraceptive',                                        'exp.educ',                                        'coverage.HIV',                                        'contraceptive income.percapita',                         'exp.educ income.percapita',
+'coverage.HIV income.percapita',
+'income.percapita med.age',
+'contraceptive med.age',
+'exp.educ med.age',
+'coverage.HIV med.age',
+'contraceptive exp.educ',
+'contraceptive coverage.HIV',
+'coverage.HIV exp.educ'),]
+```
+
+The adjusted R-squared of income.percapita and contraceptive are 0.0325563 and 0.5676406, respectively. However, upon considering both variables, the adjusted R-squared is 0.5645526. This shows that there is
+no significant increase in explaining the variation of the population growth rate when income.percapita is added to contraceptive.
+
+### Model V3 (4 variables): med.age, contraceptive, exp.educ, and coverage.HIV
+
+```{r}
+model.v3<-lm(growth~med.age+contraceptive+exp.educ+coverage.HIV, data = growth)
+```
+
+Diagnostics Checking
+
+1.) The error terms follow a normal distribution.
+
+```{r}
+ad.test(residuals(model.v3))
+```
+
+Since the p-value < 0.05, there is insufficient evidence to conclude that the residuals of the model follow a normal distribution.
+
+Several transformations were applied to the data however, these resulted in multicollinearity. With this, another socio-economic variable was added to compensate the removal of income.percapita which caused
+non-normality.
+
+The remaining economic variables were added to the model and the variable 'cell.subscriber' yielded the highest adjusted R-squared.
+
+```{r}
+# add cell.subscriber
+model.v3a<-lm(growth~med.age+contraceptive+exp.educ+coverage.HIV+cell.subscriber, data = growth)
+
+model.v3a_res <- summary(model.v3a)
+model.v3a_res$adj.r.squared
+
+# add migration
+model.v3b<-lm(growth~med.age+contraceptive+exp.educ+coverage.HIV+migration, data = growth)
+
+model.v3b_res <- summary(model.v3b)
+model.v3b_res$adj.r.squared
+
+# add fpi
+model.v3c<-lm(growth~med.age+contraceptive+exp.educ+coverage.HIV+fpi, data = growth)
+
+model.v3c_res <- summary(model.v3c)
+model.v3c_res$adj.r.squared
+
+# add lfp.female
+model.v3d<-lm(growth~med.age+contraceptive+exp.educ+coverage.HIV+lfp.female, data = growth)
+
+model.v3d_res <- summary(model.v3d)
+model.v3d_res$adj.r.squared
+
+# add gdp.growth
+model.v3e<-lm(growth~med.age+contraceptive+exp.educ+coverage.HIV+gdp.growth, data = growth)
+
+model.v3e_res <- summary(model.v3e)
+model.v3e_res$adj.r.squared
+```
+
+##MODEL.V4 (5 variables): med.age, contraceptive, exp.educ coverage.HIV, cell.subscriber
+
+```{r}
+model.v4<-lm(growth~med.age+contraceptive+exp.educ+coverage.HIV+cell.subscriber, data = growth)
+
+summary(model.v4)
+```
+
+Model v4:
+
+growth = 5.188645 - (0.1423)med.age - (0.0109)contraceptive +
+(0.0759)exp.educ - (0.0060)coverage.HIV + (0.0051)cell.subscriber
+
+The adjusted R-squared is 0.8365, which suggests that the independent variables explain 83.65% of the variation in the population growth rate.
+
+At alpha = 0.05, the variables med.age, contraceptive, exp.educ, and cell.subscriber were found to be significant. It should be noted that although not significant, coverage.HIV was retained in order to satisfy
+the normality assumption.
+
+Model Interpretation:
+
+Holding all other variables constant,
+● For every year increase in population median age, there is 14.23% decrease in a country's population growth rate. ● For every percent increase in contraceptive
+prevalence rate, there is 1.09% decrease in a country's population growth rate. 
+● For every percent increase on the government expenditure
+on education, there is 7.59% increase in a country's population growth rate. 
+● For every percent increase in antiretroviral therapy treatment
+coverage on HIV, there is 0.60% decrease in a country's population growth rate. 
+● For every increase in number of cellular subscribers per
+100 population, there is 0.51% increase in a country's population growth rate.
+
+Diagnostic Checking
+
+1.) The error terms follow a normal distribution.
+
+```{r}
+ad.test(residuals(model.v4))
+```
+
+Since the p-value is greater than 0.05, we fail to reject the null hypothesis. At 0.05 level of significance, there is sufficient evidence to conclude that the error terms follow a normal distribution.
+
+2.) The error terms have a constant variance.
+
+```{r}
+bptest(model.v4)
+```
+
+Since the p-value is greater than 0.05, we fail to reject the null hypothesis. At 0.05 level of significance, there is sufficient evidence to conclude that the error terms have a constant variance.
+
+3.) Multicollinearity
+
+```{r}
+vif(model.v4)
+```
+
+```{r}
+kappa(model.v4)
+```
+
+The VIF of each independent variable is less than 10 and the conditioned number of the model is less than 1000, which suggests that there is no severe multicollinearity present.
+
+4.) Autocorrelation - The error terms are independent.
+
+```{r}
+dwtest(model.v4,alternative="two.sided")
+
+```
+
+Since the p-value is greater than 0.05, we fail to reject the null hypothesis. There is sufficient evidence to conclude that the true autocorrelation is 0.
+
+5.) Linearity
+
+```{r}
+avPlots(model.v4)
+```
+
+Non-linearity is not detected among the independent variables.
+
+Detection of Outliers and Influential Observations
+
+Note: Influential observations refer to data points whose deletion causes substantial changes in the fitted model. Meanwhile, outliers are observations that are different from the rest. Ouliers and influential observations are examined as they affect the stability of our estimates.
+
+A. Detection of Outliers
+
+```{r}
+#standardized residuals>2
+as.matrix(rstandard(model.v4))
+max(rstandard(model.v4))
+```
+
+```{r}
+#studentized deleted residuals
+as.matrix(rstudent(model.v4))
+```
+
+```{r}
+ols_plot_resid_stud_fit(model.v4)
+```
+
+Based on the standardized residuals and studentized deleted residuals criteria, observations 17, 19, 21, and 26 are 2 standard deviations away from 0. (Recall that one of the assumptions in linear regression is that
+the error terms ~ N(mean = 0, constant variance). Because they are far from the mean, they may be considered potential outliers or influential observations.
+
+The leverage measures the distance between X values for the ith observation and the means of the X values for all n observations. A large leverage value indicates that the observation is distant from the center of the X observations. A leverage is considered large if it is
+greater than 2p/n.
+
+```{r}
+#leverage>2*(5-1)/58=0.137931
+as.matrix(hatvalues(model.v4))
+
+```
+
+```{r}
+
+plot(hatvalues(model.v4),type="h")
+```
+
+Based on the leverage criteria, observations 5, 10, 19, 21, 23, 26, 29, 31, 34, 35, 45, and 56 are considered outlying.
+
+B. Detecting Influential Observations
+
+DFFITS is a scaled measure of the change in the predicted value for the ith observation, when the ith observation is deleted. A large value indicates that the observation is very influential. A size-adjusted
+cutoff to consider is 2\*sqrt(p/n)
+
+```{r}
+#dffits >2*sqrt((5-1)/58)=0.5252257
+as.matrix(dffits(model.v4))
+```
+
+```{r}
+plot(dffits(model.v4),type="h")
+```
+
+```{r}
+plot(abs(dffits(model.v4)),type="h")
+```
+
+Based on the DFFITS criteria, observations 17, 19, 21, 26, 31, 35, 52, and 55 are considered highly influential since their absolute DFFITS exceed 0.5252.
+
+DFBETAS measures the change in each parameter estimate when the ith observation is deleted. Large values of DFBETAS indicate observations that are influential in estimating a given parameter. A size-adjusted
+cut-off for DFBETA is 2/sqrt(n).
+
+```{r}
+#dfbetas 2/sqrt(58)=0.2626129
+as.matrix(dfbeta(model.v4))
+```
+
+```{r}
+summary(abs(dfbeta(model.v4)))
+```
+
+Since none of the observations have DFBETAS exceeding the cut-off, none of them are influential in the computation of the parameter estimates.
+
+Consolidating the results of the above tests, observations 17, 19, 21, and 26 have been indicated as outliers and influential observations repeatedly.
+
+To determine whether these observations are vital or only occurred by chance and can be removed, the values of these data points are compared to the prediction intervals generated from a regression model fitted excluding the observation.
+
+```{r}
+#####Influencial variables removed#####
+m<-lm(growth~med.age+contraceptive+exp.educ+coverage.HIV+cell.subscriber,data = growth[-c(17,19,21,26,31,35,52,55),]) # model excluding influential observations
+
+new17<-data.frame(med.age=growth$med.age[17],contraceptive=growth$contraceptive[17],exp.educ=growth$exp.educ[17],coverage.HIV=growth$coverage.HIV[17],cell.subscriber=growth$cell.subscriber[17])
+
+new19<-data.frame(med.age=growth$med.age[19],contraceptive=growth$contraceptive[19],exp.educ=growth$exp.educ[19],coverage.HIV=growth$coverage.HIV[19],cell.subscriber=growth$cell.subscriber[19])
+
+new21<-data.frame(med.age=growth$med.age[21],contraceptive=growth$contraceptive[21],exp.educ=growth$exp.educ[21],coverage.HIV=growth$coverage.HIV[21],cell.subscriber=growth$cell.subscriber[21])
+
+new26<-data.frame(med.age=growth$med.age[26],contraceptive=growth$contraceptive[26],exp.educ=growth$exp.educ[26],coverage.HIV=growth$coverage.HIV[26],cell.subscriber=growth$cell.subscriber[26])
+```
+
+```{r}
+predict(m, new17, interval="predict") 
+growth$growth[17]
+predict(m, new19, interval="predict") 
+growth$growth[19]
+predict(m, new21, interval="predict") 
+growth$growth[21]
+predict(m, new26, interval="predict") 
+growth$growth[26]
+```
+
+Since none of the observed values lies within the prediction intervals, their occurrence cannot be considered by chance and cannot be removed from the sample.
+
+
